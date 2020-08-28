@@ -33,34 +33,23 @@ class ViewController: UIViewController {
     }
 
     func getDownsizedImageData(fromCompressedImageData data: Data,
-                                             shortEdgeInPixel: CGFloat? = nil,
-                                             longEdgeInPixel: CGFloat? = nil,
-                                             totalPixelLimit: CGFloat = maximumImagePixelLimit,
-                                             imageModificationBlock: ((UIImage) -> UIImage)? = nil,
-                                             compressQuality: Double = 0.75) -> Data {
+                               shortEdgeInPixel: CGFloat? = nil,
+                               longEdgeInPixel: CGFloat? = nil,
+                               totalPixelLimit: CGFloat = maximumImagePixelLimit,
+                               compressQuality: Double = 0.75) -> Data {
         // 1. get resized cgImage, do not decode.
         guard let (cgImage, imageSource) = getCGImageAndSource(fromCompressedImageData: data,
                                                                shortEdgeInPixel: shortEdgeInPixel,
                                                                longEdgeInPixel: longEdgeInPixel,
                                                                totalPixelLimit: totalPixelLimit,
                                                                decodeImage: false),
-            let imageSourceType = CGImageSourceGetType(imageSource) else {
+              let imageSourceType = CGImageSourceGetType(imageSource) else {
                 return data
         }
         
         let metaData = CGImageSourceCopyMetadataAtIndex(imageSource, 0, nil)
         
-        let image: CGImage
-        if let imageModificationBlock = imageModificationBlock {
-            /*
-             UIImage can init from CGImage and CIImage, when it init with CGImage, it's cgImage value will not be nil,
-             and this modification block are supposed to just modify the origin image, and return the image with the same type (which are supposed to have cgImage in it).
-             so if the block not do that, we'd prefer to crash (And the developer can change the logic when debug) insteaded of return the wrong data.
-             */
-            image = imageModificationBlock(UIImage(cgImage: cgImage)).cgImage!
-        } else {
-            image = cgImage
-        }
+        let image: CGImage = cgImage
         
         // 2. encode the image with quality and original metadata
         let encodedData = self.encodeCGImage(image, compressQuality: compressQuality, imageSourceType: imageSourceType, metaData: metaData)
@@ -73,11 +62,11 @@ class ViewController: UIViewController {
     }
     
     func getCGImageAndSource(fromCompressedImageData data: Data,
-                                    shortEdgeInPixel: CGFloat? = nil,
-                                    longEdgeInPixel: CGFloat? = nil,
-                                    totalPixelLimit: CGFloat,
-                                    transformImage: Bool = false,
-                                    decodeImage: Bool = false) -> (CGImage, CGImageSource)? {
+                             shortEdgeInPixel: CGFloat? = nil,
+                             longEdgeInPixel: CGFloat? = nil,
+                             totalPixelLimit: CGFloat,
+                             transformImage: Bool = false,
+                             decodeImage: Bool = false) -> (CGImage, CGImageSource)? {
         // see WWDC18 session 219
         let sourceOptions: [CFString: Any] = [
             kCGImageSourceShouldCache: false,
@@ -123,7 +112,6 @@ class ViewController: UIViewController {
         
         if metaData != nil {
             destOptions[kCGImageMetadataShouldExcludeGPS as String] = true
-            destOptions[kCGImageDestinationOrientation as String] = 1
         }
         
         var compressType: CFString
