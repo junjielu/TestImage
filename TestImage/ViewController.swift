@@ -26,9 +26,70 @@ class ViewController: UIViewController {
         imageView.frame = self.view.bounds
         self.view.addSubview(imageView)
         if let path = Bundle.main.path(forResource: "test", ofType: "heic"), let data = NSData(contentsOfFile: path) as Data? {
-            let downsizedImageData = getDownsizedImageData(fromCompressedImageData: data, shortEdgeInPixel: 1500)
+//            let downsizedImageData = getDownsizedImageData(fromCompressedImageData: data, shortEdgeInPixel: 1500)
+            let downsizedImageData = getEncodedImageData(fromCompressedImageData: data, shortEdgeInPixel: 1500)
             let image = UIImage(data: downsizedImageData)
             imageView.image = image
+        }
+    }
+    
+    func getEncodedImageData(fromCompressedImageData data: Data, shortEdgeInPixel: CGFloat) -> Data {
+        guard let imageSource = getImageSource(from: data) else {
+            return data
+        }
+        
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [String: Any],
+            let width = properties[kCGImagePropertyPixelWidth as String] as? CGFloat,
+            let height = properties[kCGImagePropertyPixelHeight as String] as? CGFloat else {
+            return data
+        }
+        
+        let originalPixelSize = CGSize(width: width, height: height)
+        
+        var scaledPixelSize = UIImage.calculatePixelSize(originalPixelSize: originalPixelSize, shortEdge: shortEdgeInPixel, longEdge: nil)
+        if scaledPixelSize.width * scaledPixelSize.height > maximumImagePixelLimit {
+            let scale = sqrt(scaledPixelSize.width * scaledPixelSize.height / maximumImagePixelLimit)
+            scaledPixelSize = CGSize(width: floor(scaledPixelSize.width / scale), height: floor(scaledPixelSize.height / scale))
+        }
+        
+        let destOptions: [String: Any] = [
+            kCGImageDestinationEmbedThumbnail as String: true,
+            kCGImageMetadataShouldExcludeGPS as String: true,
+            kCGImageDestinationLossyCompressionQuality as String: 0.75,
+            kCGImageDestinationImageMaxPixelSize as String: max(scaledPixelSize.width, scaledPixelSize.height)
+        ]
+        let compressType = "public.heic" as CFString
+        let metaData = CGImageSourceCopyMetadataAtIndex(imageSource, 0, nil)
+        guard let encodedData = encode(imageSource: imageSource, to: compressType, with: metaData, destOptions: destOptions) else {
+            return data
+        }
+        
+        return encodedData
+    }
+    
+    func getImageSource(from imageData: Data) -> CGImageSource? {
+        let sourceOptions: [CFString: Any] = [
+            kCGImageSourceShouldCache: false,
+        ]
+        return CGImageSourceCreateWithData(imageData as CFData, sourceOptions as CFDictionary)
+    }
+    
+    func encode(imageSource: CGImageSource, to compressType: CFString, with metaData: CGImageMetadata?, destOptions: [String: Any]) -> Data? {
+        // encode to data buffer
+        let newImageData = NSMutableData()
+        if let cgImageDestination = CGImageDestinationCreateWithData(newImageData, compressType, 1, nil) {
+            CGImageDestinationAddImageFromSource(cgImageDestination, imageSource, 0, destOptions as CFDictionary)
+            CGImageDestinationFinalize(cgImageDestination)
+            
+            return newImageData as Data
+        } else {
+            // sometimes encode would fail(heic is not supported before iPhone 7)
+            // fallback to jpeg instead
+            if compressType != kUTTypeJPEG {
+                return self.encode(imageSource: imageSource, to: kUTTypeJPEG, with: metaData, destOptions: destOptions)
+            } else {
+                return nil
+            }
         }
     }
 
@@ -42,7 +103,7 @@ class ViewController: UIViewController {
                                                                shortEdgeInPixel: shortEdgeInPixel,
                                                                longEdgeInPixel: longEdgeInPixel,
                                                                totalPixelLimit: totalPixelLimit,
-                                                               decodeImage: false),
+                                                               transformImage: false),
               let imageSourceType = CGImageSourceGetType(imageSource) else {
                 return data
         }
@@ -55,10 +116,20 @@ class ViewController: UIViewController {
         let encodedData = self.encodeCGImage(image, compressQuality: compressQuality, imageSourceType: imageSourceType, metaData: metaData)
         
         if let encodedData = encodedData {
+            let properties = getImageDataProperties(encodedData)
+            print(properties)
             return encodedData
         } else {
             return data
         }
+    }
+    
+    func getImageDataProperties(_ data: Data) -> [String: Any] {
+        guard let imageSource = CGImageSourceCreateWithData(data as CFData, nil) else {
+            return [:]
+        }
+        
+        return CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [String: Any] ?? [:]
     }
     
     func getCGImageAndSource(fromCompressedImageData data: Data,
@@ -108,7 +179,7 @@ class ViewController: UIViewController {
                        compressQuality: Double,
                        imageSourceType: CFString,
                        metaData: CGImageMetadata?) -> Data? {
-        var destOptions: [String: Any] = [:]
+        var destOptions: [String: Any] = [kCGImageDestinationEmbedThumbnail as String: true]
         
         if metaData != nil {
             destOptions[kCGImageMetadataShouldExcludeGPS as String] = true
